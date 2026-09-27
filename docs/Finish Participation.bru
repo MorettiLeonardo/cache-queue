@@ -1,0 +1,37 @@
+meta {
+  name: Finish Participation
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/api/participations/:id/finish
+  body: none
+  auth: none
+}
+
+params:path {
+  id: 1
+}
+
+docs {
+  Queues the participation for finalization and returns immediately.
+
+  Responses:
+    202 Accepted - job enqueued, status is "processing"
+    200 OK       - participation was already completed (no-op, idempotent)
+
+  {
+    "success": true,
+    "data": {
+      "participation_id": 12,
+      "status": "processing",
+      "queued_answers": 5,
+      "enqueued": true
+    }
+  }
+
+  Answers live in Redis until a worker drains the queue. Poll
+  GET /api/participations/:id until status becomes "completed" to read the
+  final score.
+}

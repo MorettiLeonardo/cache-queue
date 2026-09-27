@@ -1,0 +1,19 @@
+meta {
+  name: Readiness Check
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/health/ready
+  body: none
+  auth: none
+}
+
+docs {
+  Deep health check. Reports Redis connectivity, whether the finish worker is
+  running in this process, and the current depth of the finish queue
+  (waiting / active / completed / failed / delayed).
+
+  Returns 503 when Redis is unreachable.
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Answer in Participation
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/api/participations/:id/answer
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 1
+}
+
+body:json {
+  {
+    "question_id": 1,
+    "selected_option_id": 1
+  }
+}

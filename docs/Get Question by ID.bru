@@ -1,0 +1,15 @@
+meta {
+  name: Get Question by ID
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/questions/:id
+  body: none
+  auth: none
+}
+
+params:path {
+  id: 1
+}

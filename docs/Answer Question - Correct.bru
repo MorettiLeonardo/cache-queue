@@ -1,0 +1,21 @@
+meta {
+  name: Answer Question - Correct
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/questions/:id/answer
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 1
+}
+
+body:json {
+  {
+    "selected_option_id": 1
+  }
+}

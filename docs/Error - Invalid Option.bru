@@ -1,0 +1,21 @@
+meta {
+  name: Error - Invalid Option
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/questions/:id/answer
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 1
+}
+
+body:json {
+  {
+    "selected_option_id": 9999
+  }
+}
