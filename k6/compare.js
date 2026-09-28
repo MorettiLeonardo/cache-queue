@@ -109,7 +109,7 @@ const extraJourneys = val(after, 'journeys_completed', 'count') - val(before, 'j
 
 const md = `# Before / After — Redis Cache + Finish Queue
 
-Two runs of the **same** \`k6/stress-test.js\`, same 500-VU profile, same machine,
+Two runs of the **same** \`k6/stress-test.js\`, same ${int(val(after, 'vus_max', 'max'))}-VU profile, same machine,
 minutes apart. The only variable is the server's \`WRITE_BEHIND\` flag.
 
 | | Run A — before | Run B — after |

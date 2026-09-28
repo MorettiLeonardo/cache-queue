@@ -5,7 +5,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 /**
  * Grafana k6 stress test — Questionnaire Backend
  *
- * Simulates 500 concurrent users running the full quiz journey:
+ * Simulates PEAK_VUS concurrent users (default 500) running the full quiz journey:
  *   GET  /health
  *   GET  /api/questions
  *   POST /api/users
@@ -30,6 +30,12 @@ const correctAnswers = new Counter('answers_correct');
 const finalizeLag = new Trend('finalize_lag_ms', true);
 const finalizePolls = new Trend('finalize_polls');
 const finalizeTimeouts = new Counter('finalize_timeouts');
+
+// The finish response now carries the score. This counts the times it did not
+// match what this VU graded locally — it must stay at zero.
+const scoreMismatches = new Counter('score_mismatches');
+const durabilityChecks = new Counter('durability_checks');
+
 
 // Per-endpoint latency, so the report can attribute cost to a specific route.
 // A Trend carries no sample count in the summary, so each one is paired with a
@@ -57,16 +63,53 @@ function record(key, res) {
 }
 
 // ---------------------------------------------------------------------------
-// Load profile: peak of 500 concurrent virtual users
+// Load profile: ramps to PEAK_VUS concurrent virtual users (default 500).
+// The shape is fixed — 20% warm-up, 60% ramp, then a 60s sustained peak — so
+// runs at different peaks stay comparable to each other.
 // ---------------------------------------------------------------------------
-export const options = {
+const PEAK_VUS = Number(__ENV.PEAK_VUS || 500);
+const atPeak = (fraction) => Math.max(1, Math.round(PEAK_VUS * fraction));
+
+// EXECUTOR=vus (default) is a CLOSED model: a fixed VU count with think time.
+// Throughput there is a *result* of latency, so it cannot answer "how many
+// users can this hold" — only "how fast do these N users cycle".
+//
+// EXECUTOR=arrival is an OPEN model: journeys arrive at a fixed rate whether or
+// not the server keeps up. Iterations k6 cannot start on time are reported as
+// dropped_iterations, the honest signal that capacity ran out.
+const EXECUTOR = __ENV.EXECUTOR || 'vus';
+const ARRIVAL_RATE = Number(__ENV.ARRIVAL_RATE || 150);
+const ARRIVAL_DURATION = __ENV.ARRIVAL_DURATION || '50s';
+const MAX_VUS = Number(__ENV.MAX_VUS || 2000);
+
+const closedModel = {
+  executor: 'ramping-vus',
+  gracefulRampDown: '10s',
   stages: [
-    { duration: '20s', target: 100 }, // warm-up
-    { duration: '20s', target: 300 }, // ramp
-    { duration: '20s', target: 500 }, // ramp to peak
-    { duration: '60s', target: 500 }, // sustained peak: 500 VUs
-    { duration: '20s', target: 0 },   // cool-down
+    { duration: '20s', target: atPeak(0.2) }, // warm-up
+    { duration: '20s', target: atPeak(0.6) }, // ramp
+    { duration: '20s', target: PEAK_VUS },    // ramp to peak
+    { duration: '60s', target: PEAK_VUS },    // sustained peak
+    { duration: '20s', target: 0 },           // cool-down
   ],
+};
+
+const openModel = {
+  executor: 'constant-arrival-rate',
+  rate: ARRIVAL_RATE,
+  timeUnit: '1s',
+  duration: ARRIVAL_DURATION,
+  // Journeys are short when the server is healthy, so a small pool covers the
+  // rate; k6 grows it toward maxVUs as latency rises, and only reports dropped
+  // iterations once even maxVUs cannot keep the schedule.
+  preAllocatedVUs: Math.min(MAX_VUS, Math.max(50, ARRIVAL_RATE)),
+  maxVUs: MAX_VUS,
+  gracefulStop: '20s',
+};
+
+export const options = {
+  scenarios: { journey: EXECUTOR === 'arrival' ? openModel : closedModel },
+
   thresholds: {
     http_req_duration: ['p(95)<1500', 'p(99)<3000'],
     http_req_failed: ['rate<0.05'],
@@ -91,6 +134,12 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 // How long a VU waits for the finish queue before giving up (default 10s).
 const FINALIZE_POLL_INTERVAL = Number(__ENV.FINALIZE_POLL_INTERVAL || 0.2);
 const FINALIZE_MAX_POLLS = Number(__ENV.FINALIZE_MAX_POLLS || 50);
+
+// Fraction of journeys that poll to confirm the answers reached PostgreSQL.
+// The user already has their score from the finish response, so this is pure
+// instrumentation — sampling it keeps the measurement without the load.
+const DURABILITY_SAMPLE = Number(__ENV.DURABILITY_SAMPLE || 1);
+
 
 // ---------------------------------------------------------------------------
 // setup(): build a real question bank from the API instead of hardcoding IDs
@@ -221,6 +270,8 @@ export default function (data) {
   if (aborted || !participationId) return abort(journeyStart);
 
   // --- Answer N distinct random questions ------------------------------------
+  let localCorrect = 0;
+
   group('05_answer_questions', function () {
     const questions = pickDistinct(bank, ANSWERS_PER_JOURNEY);
 
@@ -250,7 +301,10 @@ export default function (data) {
       if (ok) {
         answersSubmitted.add(1);
         try {
-          if (JSON.parse(res.body).data.is_correct) correctAnswers.add(1);
+          if (JSON.parse(res.body).data.is_correct) {
+            correctAnswers.add(1);
+            localCorrect++;
+          }
         } catch (e) {
           // verdict already validated by the check above
         }
@@ -258,8 +312,10 @@ export default function (data) {
     }
   });
 
-  // --- Finish: enqueues, returns 202 -----------------------------------------
-  let enqueued = false;
+  // --- Finish: the score comes back with the response ------------------------
+  // The staged answers are already in Redis when /finish is called, so the
+  // score is known right there. The queue only has to make it durable.
+  let finishOk = false;
   const finishSentAt = Date.now();
 
   group('06_finish_participation', function () {
@@ -268,7 +324,8 @@ export default function (data) {
       tags: { endpoint: 'finish', name: 'POST /api/participations/:id/finish' },
     });
     record('finish', res);
-    enqueued = check(res, {
+
+    finishOk = check(res, {
       'finish accepted (202/200)': (r) => r.status === 202 || r.status === 200,
       'status processing or completed': (r) => {
         try {
@@ -278,52 +335,78 @@ export default function (data) {
           return false;
         }
       },
+      'score returned with the response': (r) => {
+        try {
+          return typeof JSON.parse(r.body).data.score === 'number';
+        } catch (e) {
+          return false;
+        }
+      },
+      'score matches what k6 graded': (r) => {
+        try {
+          return JSON.parse(r.body).data.score === localCorrect;
+        } catch (e) {
+          return false;
+        }
+      },
     });
+
+    try {
+      if (JSON.parse(res.body).data.score !== localCorrect) scoreMismatches.add(1);
+    } catch (e) {
+      scoreMismatches.add(1);
+    }
   });
 
-  // --- Poll until the worker has drained it ----------------------------------
-  // The journey only counts as complete once the participation is durable in
-  // PostgreSQL, so this measures the queue end-to-end, not just the enqueue.
-  let finished = false;
-  group('07_await_completion', function () {
-    let polls = 0;
+  // The user has their score at this point. Everything after is instrumentation.
+  const userVisibleMs = Date.now() - journeyStart;
 
-    for (let i = 0; i < FINALIZE_MAX_POLLS; i++) {
-      const res = http.get(`${BASE_URL}/api/participations/${participationId}`, {
-        tags: { endpoint: 'get_participation', name: 'GET /api/participations/:id' },
-      });
-      record('get_participation', res);
-      polls++;
+  // --- Durability: confirm the worker persisted it, on a sample of journeys --
+  let durable = true;
 
-      if (res.status !== 200) break;
+  if (finishOk && Math.random() < DURABILITY_SAMPLE) {
+    group('07_verify_durable', function () {
+      durable = false;
+      durabilityChecks.add(1);
+      let polls = 0;
 
-      let status;
-      try {
-        status = JSON.parse(res.body).data.status;
-      } catch (e) {
-        break;
+      for (let i = 0; i < FINALIZE_MAX_POLLS; i++) {
+        const res = http.get(`${BASE_URL}/api/participations/${participationId}`, {
+          tags: { endpoint: 'get_participation', name: 'GET /api/participations/:id' },
+        });
+        record('get_participation', res);
+        polls++;
+
+        if (res.status !== 200) break;
+
+        let status;
+        try {
+          status = JSON.parse(res.body).data.status;
+        } catch (e) {
+          break;
+        }
+
+        if (status === 'completed') {
+          durable = true;
+          break;
+        }
+
+        sleep(FINALIZE_POLL_INTERVAL);
       }
 
-      if (status === 'completed') {
-        finished = true;
-        break;
+      finalizePolls.add(polls);
+
+      if (durable) {
+        finalizeLag.add(Date.now() - finishSentAt);
+      } else {
+        finalizeTimeouts.add(1);
       }
 
-      sleep(FINALIZE_POLL_INTERVAL);
-    }
+      check(null, { 'participation reached completed': () => durable });
+    });
+  }
 
-    finalizePolls.add(polls);
-
-    if (finished) {
-      finalizeLag.add(Date.now() - finishSentAt);
-    } else {
-      finalizeTimeouts.add(1);
-    }
-
-    check(null, { 'participation reached completed': () => finished });
-  });
-
-  if (finished) {
+  if (finishOk && durable) {
     journeysCompleted.add(1);
     journeyFailRate.add(false);
   } else {
@@ -331,10 +414,17 @@ export default function (data) {
     journeyFailRate.add(true);
   }
 
-  journeyDuration.add(Date.now() - journeyStart);
+  // What the user waited for: start of journey until the score was in hand.
+  journeyDuration.add(userVisibleMs);
 
-  sleep(Math.random() * 0.6 + 0.2); // think time 0.2–0.8s
+  // Think time belongs to the closed model only. Under an arrival rate the
+  // pacing comes from the executor, and sleeping here would just inflate the
+  // VU pool without changing the load the server sees.
+  if (EXECUTOR !== 'arrival') {
+    sleep(Math.random() * 0.6 + 0.2);
+  }
 }
+
 
 function abort(journeyStart) {
   journeysAborted.add(1);
