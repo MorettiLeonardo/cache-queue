@@ -31,6 +31,12 @@ export interface FinishParticipationParams {
 export interface FinishParticipationResult {
   participation_id: number;
   status: ReportedParticipationStatus;
+  /**
+   * The final score, known from the staged answers the moment finish is called.
+   * The client never has to wait for the worker to make it durable to show it.
+   */
+  score: number;
+  answered: number;
   queued_answers: number;
   enqueued: boolean;
 }

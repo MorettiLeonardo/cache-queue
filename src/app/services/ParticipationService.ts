@@ -184,16 +184,35 @@ export class ParticipationService {
 
 
     if (status === ParticipationStatus.COMPLETED || status === TransientParticipationStatus.PROCESSING) {
+      const staged = await this.cache.getAnswers(participation_id);
+
+      if (staged.length > 0) {
+
+        return {
+          participation_id,
+          status,
+          score: staged.filter((a) => a.is_correct).length,
+          answered: staged.length,
+          queued_answers: status === TransientParticipationStatus.PROCESSING ? staged.length : 0,
+          enqueued: false
+        };
+      }
+
+
+      const summary = await this.participationRepo.getSummary(participation_id, 0);
+
       return {
         participation_id,
         status,
-        queued_answers: status === TransientParticipationStatus.PROCESSING ? await this.cache.countAnswers(participation_id) : 0,
+        score: summary ? summary.score : 0,
+        answered: summary ? summary.total_questions_answered : 0,
+        queued_answers: 0,
         enqueued: false
       };
     }
 
     const answers = await this.cache.getAnswers(participation_id);
-
+    const score = answers.filter((a) => a.is_correct).length;
 
     await this.cache.setStatus(participation_id, TransientParticipationStatus.PROCESSING);
 
@@ -212,6 +231,8 @@ export class ParticipationService {
     return {
       participation_id,
       status: TransientParticipationStatus.PROCESSING,
+      score,
+      answered: answers.length,
       queued_answers: answers.length,
       enqueued: true
     };
@@ -335,14 +356,17 @@ export class ParticipationService {
       throw new NotFoundError(`Participation with id ${participation_id} was not found`);
     }
 
+    const { score, answeredCount } =
+      await this.participationRepo.calculateScoreAndCount(participation_id);
+
     if (participation.status !== ParticipationStatus.COMPLETED) {
-      const { score, answeredCount } =
-        await this.participationRepo.calculateScoreAndCount(participation_id);
       await this.participationRepo.finish(participation_id, score, answeredCount);
 
       return {
         participation_id,
         status: ParticipationStatus.COMPLETED,
+        score,
+        answered: answeredCount,
         queued_answers: answeredCount,
         enqueued: false
       };
@@ -351,6 +375,8 @@ export class ParticipationService {
     return {
       participation_id,
       status: ParticipationStatus.COMPLETED,
+      score,
+      answered: answeredCount,
       queued_answers: 0,
       enqueued: false
     };
