@@ -1,6 +1,10 @@
 import { QuestionRepository } from '../repository/QuestionRepository.js';
 import { QuestionMapper } from '../mappers/QuestionMapper.js';
 import { NotFoundError, ValidationError } from '../errors/DomainError.js';
+import {
+  QuestionDifficulty,
+  isQuestionDifficulty
+} from '../../types/entities/Question.types.js';
 import type {
   ListQuestionsParams,
   ListQuestionsResult,
@@ -30,10 +34,11 @@ export class QuestionService {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 50));
     const offset = (page - 1) * limit;
+    const difficulty = this.parseDifficulty(params.difficulty);
 
     const filter = {
       category: params.category,
-      difficulty: params.difficulty,
+      difficulty,
       limit,
       offset
     };
@@ -41,7 +46,7 @@ export class QuestionService {
     const questions = await this.repository.findAll(filter);
     const total = await this.repository.countAll({
       category: params.category,
-      difficulty: params.difficulty
+      difficulty
     });
 
     const total_pages = Math.ceil(total / limit) || 1;
@@ -100,5 +105,19 @@ export class QuestionService {
       correct_option_id: answerData.correct_option_id,
       explanation: answerData.explanation
     };
+  }
+
+  private parseDifficulty(value?: string): QuestionDifficulty | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (!isQuestionDifficulty(value)) {
+      throw new ValidationError(
+        `Invalid difficulty "${value}". Expected one of: ${Object.values(QuestionDifficulty).join(', ')}`
+      );
+    }
+
+    return value;
   }
 }

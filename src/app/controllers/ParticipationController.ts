@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ParticipationService } from '../services/ParticipationService.js';
+import { ParticipationStatus } from '../../types/entities/Participation.types.js';
 
 export class ParticipationController {
   private service: ParticipationService;
@@ -46,7 +47,7 @@ export class ParticipationController {
       const participation_id = parseInt(String(req.params.id), 10);
       const result = await this.service.finishParticipation({ participation_id });
 
-      res.status(result.status === 'completed' ? 200 : 202).json({
+      res.status(result.status === ParticipationStatus.COMPLETED ? 200 : 202).json({
         success: true,
         data: result
       });

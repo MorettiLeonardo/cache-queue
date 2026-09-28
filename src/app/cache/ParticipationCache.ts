@@ -1,9 +1,11 @@
 import { getRedis } from '../../config/redis.js';
-import type {
-  CachedAnswer,
-  CachedParticipationMeta,
-  ReportedParticipationStatus,
+import {
+  isReportedParticipationStatus,
+  type CachedAnswer,
+  type CachedParticipationMeta,
+  type ReportedParticipationStatus,
 } from '../../types/cache/ParticipationCache.types.js';
+import { ParticipationStatus } from '../../types/entities/Participation.types.js';
 
 const TTL = Number(process.env.CACHE_TTL_PARTICIPATION || 7200);
 
@@ -45,7 +47,9 @@ export class ParticipationCache {
       user_id: Number(raw.user_id),
       user_name: raw.user_name,
       user_email: raw.user_email,
-      status: raw.status as ReportedParticipationStatus,
+      status: isReportedParticipationStatus(raw.status)
+        ? raw.status
+        : ParticipationStatus.IN_PROGRESS,
       started_at: raw.started_at,
     };
   }

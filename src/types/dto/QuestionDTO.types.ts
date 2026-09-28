@@ -15,6 +15,7 @@ export interface PublicQuestionDTO {
 
 export interface ListQuestionsQueryDTO {
   category?: string;
+  /** Raw, unvalidated query-string value; parsed into QuestionDifficulty by the service. */
   difficulty?: string;
   limit?: number;
   page?: number;

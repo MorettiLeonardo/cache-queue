@@ -1,9 +1,16 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { QuestionDifficulty } from '../types/entities/Question.types.js';
+import { ParticipationStatus } from '../types/entities/Participation.types.js';
 
 dotenv.config();
 
 const { Pool } = pg;
+
+/** Renders enum members as a quoted SQL value list for CHECK constraints. */
+function sqlValues(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(', ');
+}
 
 let poolInstance: pg.Pool | null = null;
 
@@ -32,7 +39,7 @@ export async function initDatabase(): Promise<void> {
       id SERIAL PRIMARY KEY,
       question_text TEXT NOT NULL,
       category VARCHAR(100) NOT NULL,
-      difficulty VARCHAR(20) NOT NULL CHECK(difficulty IN ('easy', 'medium', 'hard')),
+      difficulty VARCHAR(20) NOT NULL CHECK(difficulty IN (${sqlValues(Object.values(QuestionDifficulty))})),
       explanation TEXT NOT NULL,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
@@ -54,7 +61,7 @@ export async function initDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS participations (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      status VARCHAR(20) NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress', 'completed')),
+      status VARCHAR(20) NOT NULL DEFAULT '${ParticipationStatus.IN_PROGRESS}' CHECK(status IN (${sqlValues(Object.values(ParticipationStatus))})),
       score INTEGER DEFAULT 0,
       total_questions INTEGER DEFAULT 0,
       started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

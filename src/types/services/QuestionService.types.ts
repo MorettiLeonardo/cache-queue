@@ -3,6 +3,7 @@ import { AnswerResultDTO } from '../dto/AnswerDTO.types.js';
 
 export interface ListQuestionsParams {
   category?: string;
+  /** Raw, unvalidated query-string value; parsed into QuestionDifficulty by the service. */
   difficulty?: string;
   page?: number;
   limit?: number;

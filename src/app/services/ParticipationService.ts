@@ -15,10 +15,13 @@ import type {
   GetParticipationParams,
   GetParticipationResult
 } from '../../types/services/ParticipationService.types.js';
-import type {
-  CachedAnswer,
-  CachedParticipationMeta
+import {
+  TransientParticipationStatus,
+  type CachedAnswer,
+  type CachedParticipationMeta,
+  type ReportedParticipationStatus
 } from '../../types/cache/ParticipationCache.types.js';
+import { ParticipationStatus } from '../../types/entities/Participation.types.js';
 
 const WRITE_BEHIND = process.env.WRITE_BEHIND !== 'false';
 
@@ -62,7 +65,7 @@ export class ParticipationService {
       return {
         participation_id: participation.id,
         user_id: participation.user_id,
-        status: 'in_progress',
+        status: ParticipationStatus.IN_PROGRESS,
         started_at
       };
     }
@@ -72,7 +75,7 @@ export class ParticipationService {
       user_id: participation.user_id,
       user_name: user.name,
       user_email: user.email,
-      status: 'in_progress',
+      status: ParticipationStatus.IN_PROGRESS,
       started_at
     };
 
@@ -83,7 +86,7 @@ export class ParticipationService {
     return {
       participation_id: participation.id,
       user_id: participation.user_id,
-      status: 'in_progress',
+      status: ParticipationStatus.IN_PROGRESS,
       started_at
     };
   }
@@ -113,9 +116,9 @@ export class ParticipationService {
       throw new NotFoundError(`Participation with id ${participation_id} was not found`);
     }
 
-    if (status !== 'in_progress') {
+    if (status !== ParticipationStatus.IN_PROGRESS) {
       throw new ValidationError(
-        status === 'processing'
+        status === TransientParticipationStatus.PROCESSING
           ? 'This participation is already being finalized and no longer accepts answers'
           : 'Cannot submit answers to an already completed participation session'
       );
@@ -180,11 +183,11 @@ export class ParticipationService {
     }
 
 
-    if (status === 'completed' || status === 'processing') {
+    if (status === ParticipationStatus.COMPLETED || status === TransientParticipationStatus.PROCESSING) {
       return {
         participation_id,
         status,
-        queued_answers: status === 'processing' ? await this.cache.countAnswers(participation_id) : 0,
+        queued_answers: status === TransientParticipationStatus.PROCESSING ? await this.cache.countAnswers(participation_id) : 0,
         enqueued: false
       };
     }
@@ -192,7 +195,7 @@ export class ParticipationService {
     const answers = await this.cache.getAnswers(participation_id);
 
 
-    await this.cache.setStatus(participation_id, 'processing');
+    await this.cache.setStatus(participation_id, TransientParticipationStatus.PROCESSING);
 
     try {
       await enqueueFinish({
@@ -202,13 +205,13 @@ export class ParticipationService {
       });
     } catch (error) {
 
-      await this.cache.setStatus(participation_id, 'in_progress');
+      await this.cache.setStatus(participation_id, ParticipationStatus.IN_PROGRESS);
       throw error;
     }
 
     return {
       participation_id,
-      status: 'processing',
+      status: TransientParticipationStatus.PROCESSING,
       queued_answers: answers.length,
       enqueued: true
     };
@@ -234,7 +237,7 @@ export class ParticipationService {
     const totalAvailable = await this.questionCache.countAll();
 
 
-    if (meta && meta.status !== 'completed') {
+    if (meta && meta.status !== ParticipationStatus.COMPLETED) {
       const answers = await this.cache.getAnswers(id);
       const score = answers.filter((a) => a.is_correct).length;
       const answered = answers.length;
@@ -274,7 +277,7 @@ export class ParticipationService {
       throw new NotFoundError(`Participation with id ${participation_id} was not found`);
     }
 
-    if (participation.status === 'completed') {
+    if (participation.status === ParticipationStatus.COMPLETED) {
       throw new ValidationError(
         'Cannot submit answers to an already completed participation session'
       );
@@ -332,14 +335,14 @@ export class ParticipationService {
       throw new NotFoundError(`Participation with id ${participation_id} was not found`);
     }
 
-    if (participation.status !== 'completed') {
+    if (participation.status !== ParticipationStatus.COMPLETED) {
       const { score, answeredCount } =
         await this.participationRepo.calculateScoreAndCount(participation_id);
       await this.participationRepo.finish(participation_id, score, answeredCount);
 
       return {
         participation_id,
-        status: 'completed',
+        status: ParticipationStatus.COMPLETED,
         queued_answers: answeredCount,
         enqueued: false
       };
@@ -347,7 +350,7 @@ export class ParticipationService {
 
     return {
       participation_id,
-      status: 'completed',
+      status: ParticipationStatus.COMPLETED,
       queued_answers: 0,
       enqueued: false
     };
@@ -355,7 +358,7 @@ export class ParticipationService {
 
   private async resolveStatus(
     participationId: number
-  ): Promise<'in_progress' | 'processing' | 'completed' | null> {
+  ): Promise<ReportedParticipationStatus | null> {
     const meta = await this.cache.getMeta(participationId);
     if (meta) {
       return meta.status;
@@ -366,7 +369,7 @@ export class ParticipationService {
 
   private async statusFromDb(
     participationId: number
-  ): Promise<'in_progress' | 'processing' | 'completed' | null> {
+  ): Promise<ReportedParticipationStatus | null> {
     const summary = await this.participationRepo.getSummary(participationId, 0);
     if (!summary) {
       return null;

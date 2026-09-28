@@ -1,5 +1,9 @@
 import { getPool } from '../../config/database.js';
-import type { ParticipationEntity, UserAnswerEntity } from '../../types/entities/Participation.types.js';
+import {
+  ParticipationStatus,
+  type ParticipationEntity,
+  type UserAnswerEntity
+} from '../../types/entities/Participation.types.js';
 import type { ParticipationSummaryDTO } from '../../types/dto/ParticipationDTO.types.js';
 
 export class ParticipationRepository {
@@ -8,7 +12,7 @@ export class ParticipationRepository {
   public async create(userId: number): Promise<ParticipationEntity> {
     const query = `
       INSERT INTO participations (user_id, status)
-      VALUES ($1, 'in_progress')
+      VALUES ($1, '${ParticipationStatus.IN_PROGRESS}')
       RETURNING id, user_id, status, score, total_questions, started_at, finished_at
     `;
     const { rows } = await this.pool.query<ParticipationEntity>(query, [userId]);
@@ -73,7 +77,7 @@ export class ParticipationRepository {
   public async finish(id: number, score: number, totalQuestions: number): Promise<ParticipationEntity> {
     const query = `
       UPDATE participations
-      SET status = 'completed', score = $2, total_questions = $3, finished_at = CURRENT_TIMESTAMP
+      SET status = '${ParticipationStatus.COMPLETED}', score = $2, total_questions = $3, finished_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING id, user_id, status, score, total_questions, started_at, finished_at
     `;
@@ -96,7 +100,7 @@ export class ParticipationRepository {
       await client.query('BEGIN');
 
 
-      const { rows: locked } = await client.query<{ status: string }>(
+      const { rows: locked } = await client.query<{ status: ParticipationStatus }>(
         'SELECT status FROM participations WHERE id = $1 FOR UPDATE',
         [participationId]
       );
@@ -106,7 +110,7 @@ export class ParticipationRepository {
         return null;
       }
 
-      const alreadyCompleted = locked[0].status === 'completed';
+      const alreadyCompleted = locked[0].status === ParticipationStatus.COMPLETED;
       let persistedAnswers = 0;
 
       if (answers.length > 0) {
@@ -147,8 +151,8 @@ export class ParticipationRepository {
         await client.query(
           `
           UPDATE participations
-          SET status = 'completed', score = $2, total_questions = $3, finished_at = CURRENT_TIMESTAMP
-          WHERE id = $1 AND status <> 'completed'
+          SET status = '${ParticipationStatus.COMPLETED}', score = $2, total_questions = $3, finished_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND status <> '${ParticipationStatus.COMPLETED}'
           `,
           [participationId, score, answeredCount]
         );
@@ -194,7 +198,7 @@ export class ParticipationRepository {
       user_id: row.user_id,
       user_name: row.user_name,
       user_email: row.user_email,
-      status: row.status,
+      status: row.status as ParticipationStatus,
       score,
       total_questions_answered: answered,
       total_available_questions: totalAvailableQuestions,

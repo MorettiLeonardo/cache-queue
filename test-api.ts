@@ -5,6 +5,8 @@ import { closeRedis } from './src/config/redis.js';
 import { closeFinishQueue } from './src/app/queue/finishQueue.js';
 import { stopFinishWorker } from './src/app/queue/finishWorker.js';
 import http from 'node:http';
+import { ParticipationStatus } from './src/types/entities/Participation.types.js';
+import { TransientParticipationStatus } from './src/types/cache/ParticipationCache.types.js';
 
 /**
  * Finishing is asynchronous — poll the participation until the queue worker has
@@ -21,7 +23,7 @@ async function pollUntilCompleted(
     const res = await fetch(`${baseUrl}/api/participations/${participationId}`);
     if (res.status === 200) {
       const body = (await res.json()) as any;
-      if (body.data?.status === 'completed') {
+      if (body.data?.status === ParticipationStatus.COMPLETED) {
         return body.data;
       }
     }
@@ -138,7 +140,7 @@ async function runTests() {
       body: JSON.stringify({ user_id: userId })
     });
     const startData = await startRes.json() as any;
-    assert(startRes.status === 201 && startData.data.status === 'in_progress', 'POST /api/participations/start starts a session');
+    assert(startRes.status === 201 && startData.data.status === ParticipationStatus.IN_PROGRESS, 'POST /api/participations/start starts a session');
     const participationId = startData.data.participation_id;
 
     // 12. Answer Question 1 correctly in participation session
@@ -173,14 +175,14 @@ async function runTests() {
     });
     const finishData = await finishRes.json() as any;
     assert(finishRes.status === 202, 'POST /api/participations/:id/finish returns 202 Accepted');
-    assert(finishData.data.status === 'processing', 'Finish reports status: processing');
+    assert(finishData.data.status === TransientParticipationStatus.PROCESSING, 'Finish reports status: processing');
     assert(finishData.data.queued_answers === 2, `Queues the cached answers (2, got ${finishData.data.queued_answers})`);
     assert(finishData.data.enqueued === true, 'Finish reports the job was enqueued');
 
     // 15b. The worker drains the queue and persists the participation
     const completed = await pollUntilCompleted(baseUrl, participationId);
     assert(completed !== null, 'Finish queue completes the participation');
-    assert(completed?.status === 'completed', 'Worker marks participation as completed');
+    assert(completed?.status === ParticipationStatus.COMPLETED, 'Worker marks participation as completed');
     assert(completed?.score === 1, `Calculates correct score (1/2, got ${completed?.score})`);
     assert(completed?.total_questions_answered === 2, 'Tracks total questions answered (2)');
     assert(completed?.percentage === 50, `Calculates accurate accuracy percentage (50%, got ${completed?.percentage}%)`);

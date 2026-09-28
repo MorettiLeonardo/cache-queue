@@ -1,6 +1,8 @@
+import { QuestionDifficulty } from '../entities/Question.types.js';
+
 export interface QuestionFilter {
   category?: string;
-  difficulty?: string;
+  difficulty?: QuestionDifficulty;
   limit?: number;
   offset?: number;
 }

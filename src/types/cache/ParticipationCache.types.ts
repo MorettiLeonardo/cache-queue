@@ -1,6 +1,25 @@
-import type { ParticipationStatus } from '../entities/Participation.types.js';
+import { ParticipationStatus } from '../entities/Participation.types.js';
 
-export type ReportedParticipationStatus = ParticipationStatus | 'processing';
+/**
+ * Status that exists only while a finish job is in flight. It is reported to
+ * clients and kept in the cache, but never persisted to the database.
+ */
+export enum TransientParticipationStatus {
+  PROCESSING = 'processing'
+}
+
+export type ReportedParticipationStatus = ParticipationStatus | TransientParticipationStatus;
+
+const REPORTED_STATUSES: readonly string[] = [
+  ...Object.values(ParticipationStatus),
+  ...Object.values(TransientParticipationStatus)
+];
+
+export function isReportedParticipationStatus(
+  value: unknown
+): value is ReportedParticipationStatus {
+  return typeof value === 'string' && REPORTED_STATUSES.includes(value);
+}
 
 export interface CachedParticipationMeta {
   participation_id: number;

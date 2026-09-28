@@ -3,6 +3,7 @@ import {
   ParticipationSummaryDTO
 } from '../dto/ParticipationDTO.types.js';
 import type { ReportedParticipationStatus } from '../cache/ParticipationCache.types.js';
+import { ParticipationStatus } from '../entities/Participation.types.js';
 
 export interface StartParticipationParams {
   user_id: number;
@@ -11,7 +12,7 @@ export interface StartParticipationParams {
 export interface StartParticipationResult {
   participation_id: number;
   user_id: number;
-  status: 'in_progress';
+  status: ParticipationStatus.IN_PROGRESS;
   started_at: string;
 }
 

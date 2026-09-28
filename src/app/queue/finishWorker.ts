@@ -7,6 +7,7 @@ import {
   type FinishParticipationJob,
   type FinishJobResult,
 } from '../../types/queue/FinishQueue.types.js';
+import { ParticipationStatus } from '../../types/entities/Participation.types.js';
 
 const CONCURRENCY = Number(process.env.FINISH_QUEUE_CONCURRENCY || 25);
 
@@ -41,7 +42,7 @@ export function startFinishWorker(): Worker<FinishParticipationJob, FinishJobRes
 
 
       await cache.clearAnswers(participation_id);
-      await cache.setStatus(participation_id, 'completed');
+      await cache.setStatus(participation_id, ParticipationStatus.COMPLETED);
 
       return {
         participation_id,

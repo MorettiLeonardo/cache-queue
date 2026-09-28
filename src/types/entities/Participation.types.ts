@@ -1,4 +1,7 @@
-export type ParticipationStatus = 'in_progress' | 'completed';
+export enum ParticipationStatus {
+  IN_PROGRESS = 'in_progress',
+  COMPLETED = 'completed'
+}
 
 export interface ParticipationEntity {
   id: number;
