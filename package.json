@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
+    "worker": "tsx src/worker.ts",
     "seed": "tsx src/seeders/seed.ts",
     "test": "tsx test-api.ts",
     "build": "tsc"
